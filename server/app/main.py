@@ -1,15 +1,24 @@
 from fastapi import FastAPI
-from app import auth, events
+from fastapi.middleware.cors import CORSMiddleware
+from app.auth import router as auth_router
+from app.events import router as events_router
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Your Next.js client URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Root route
 @app.get("/")
 def read_root():
     return {"message": "Sports Event Management API"}
 
-# Include auth routes
-app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-
-# Include event management routes
-app.include_router(events.router, prefix="/events", tags=["Events"])
+# Include routers
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(events_router, prefix="/events", tags=["Events"])
