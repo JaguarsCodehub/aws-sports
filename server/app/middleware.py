@@ -1,30 +1,70 @@
 from fastapi import Request, HTTPException
 import jwt
+import os
+from jwt.algorithms import RSAAlgorithm
+import requests
 from functools import wraps
+
+def get_cognito_public_keys():
+    region = os.getenv('AWS_REGION')
+    pool_id = os.getenv('COGNITO_USER_POOL_ID')
+    url = f'https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json'
+    response = requests.get(url)
+    return response.json()['keys']
 
 def require_role(role: str):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             request = next(arg for arg in args if isinstance(arg, Request))
-            token = request.headers.get('Authorization')
+            auth_header = request.headers.get('Authorization')
             
-            if not token:
-                raise HTTPException(status_code=401, detail="No token provided")
+            if not auth_header or not auth_header.startswith('Bearer '):
+                raise HTTPException(status_code=401, detail="Invalid authorization header")
+            
+            token = auth_header.split(' ')[1]
             
             try:
-                # Verify the JWT token and extract claims
-                decoded = jwt.decode(token.split(' ')[1], verify=False)
-                user_role = decoded.get('custom:role')
+                # Decode JWT token header to get kid
+                header = jwt.get_unverified_header(token)
+                kid = header['kid']
                 
+                # Get public keys from Cognito
+                keys = get_cognito_public_keys()
+                key = next((k for k in keys if k['kid'] == kid), None)
+                
+                if not key:
+                    raise HTTPException(status_code=401, detail="Invalid token key")
+                
+                # Convert JWK to PEM format
+                public_key = RSAAlgorithm.from_jwk(key)
+                
+                # Verify and decode token
+                decoded = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=['RS256'],
+                    audience=os.getenv('COGNITO_USER_POOL_CLIENT_ID')
+                )
+                
+                # Check user role
+                user_role = decoded.get('custom:role')
                 if user_role != role:
-                    raise HTTPException(
-                        status_code=403, 
-                        detail="Insufficient permissions"
-                    )
+                    raise HTTPException(status_code=403, detail="Insufficient permissions")
+                
+                # Add user info to request state
+                request.state.user = {
+                    'id': decoded['sub'],
+                    'email': decoded['email'],
+                    'role': user_role
+                }
                 
                 return await func(*args, **kwargs)
+            except jwt.ExpiredSignatureError:
+                raise HTTPException(status_code=401, detail="Token has expired")
+            except jwt.InvalidTokenError as e:
+                raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
             except Exception as e:
-                raise HTTPException(status_code=401, detail="Invalid token")
+                raise HTTPException(status_code=401, detail=str(e))
         return wrapper
     return decorator
