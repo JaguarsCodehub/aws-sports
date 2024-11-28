@@ -12,40 +12,65 @@ interface EventForm {
     banner?: File
 }
 
-export default function EventsPage() {
+export default function CreateEvent() {
     const router = useRouter()
     const [event, setEvent] = useState<EventForm>({
         title: '',
         description: '',
         date: '',
         location: '',
-        max_participants: 0
+        max_participants: 0,
     })
     const [banner, setBanner] = useState<File | null>(null)
+    const [error, setError] = useState<string | null>(null)
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        if (name === 'max_participants') {
+            setEvent((prev) => ({
+                ...prev,
+                [name]: Number(value)
+            }));
+        } else {
+            setEvent((prev) => ({
+                ...prev,
+                [name]: value
+            }));
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
+        e.preventDefault();
+        setError(null);
 
-        const formData = new FormData()
-        formData.append('event', JSON.stringify(event))
+        const formData = new FormData();
+        formData.append('title', event.title);
+        formData.append('description', event.description);
+        formData.append('date', new Date(event.date).toISOString());
+        formData.append('location', event.location);
+        formData.append('max_participants', String(event.max_participants));
+        formData.append('organizer_id', localStorage.getItem('organizer_id')!);
         if (banner) {
-            formData.append('banner', banner)
+            formData.append('banner', banner);
         }
 
         try {
-            await apiClient('/events', {
+            const response = await fetch('http://localhost:8000/events', {
                 method: 'POST',
                 body: formData,
-                headers: {}
-            })
+            });
 
-            alert('Event created successfully!')
-            router.push('/dashboard/events/list')
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to create event');
+            }
+
+            alert('Event created successfully!');
+            router.push('/admin/events');
         } catch (error) {
-            console.error('Error:', error)
-            alert(error instanceof Error ? error.message : 'Failed to create event')
+            setError(error instanceof Error ? error.message : 'An error occurred');
         }
-    }
+    };
 
     return (
         <div className="max-w-2xl mx-auto p-4">
@@ -55,8 +80,9 @@ export default function EventsPage() {
                     <label className="block mb-1">Event Title</label>
                     <input
                         type="text"
+                        name="title"
                         value={event.title}
-                        onChange={(e) => setEvent({ ...event, title: e.target.value })}
+                        onChange={handleInputChange}
                         className="w-full p-2 border rounded"
                         required
                     />
@@ -64,11 +90,12 @@ export default function EventsPage() {
 
                 <div>
                     <label className="block mb-1">Description</label>
-                    <textarea
+                    <input
+                        name="description"
                         value={event.description}
-                        onChange={(e) => setEvent({ ...event, description: e.target.value })}
+                        onChange={handleInputChange}
                         className="w-full p-2 border rounded"
-                        rows={4}
+                        // rows={4}
                         required
                     />
                 </div>
@@ -77,8 +104,9 @@ export default function EventsPage() {
                     <label className="block mb-1">Date</label>
                     <input
                         type="datetime-local"
+                        name="date"
                         value={event.date}
-                        onChange={(e) => setEvent({ ...event, date: e.target.value })}
+                        onChange={handleInputChange}
                         className="w-full p-2 border rounded"
                         required
                     />
@@ -88,8 +116,9 @@ export default function EventsPage() {
                     <label className="block mb-1">Location</label>
                     <input
                         type="text"
+                        name="location"
                         value={event.location}
-                        onChange={(e) => setEvent({ ...event, location: e.target.value })}
+                        onChange={handleInputChange}
                         className="w-full p-2 border rounded"
                         required
                     />
@@ -99,8 +128,9 @@ export default function EventsPage() {
                     <label className="block mb-1">Maximum Participants</label>
                     <input
                         type="number"
+                        name="max_participants"
                         value={event.max_participants}
-                        onChange={(e) => setEvent({ ...event, max_participants: parseInt(e.target.value) })}
+                        onChange={handleInputChange}
                         className="w-full p-2 border rounded"
                         required
                     />
@@ -115,6 +145,8 @@ export default function EventsPage() {
                         accept="image/*"
                     />
                 </div>
+
+                {error && <div className="text-red-500">{error}</div>}
 
                 <button
                     type="submit"

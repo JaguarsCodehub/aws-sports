@@ -117,3 +117,53 @@ async def create_organizer(
     
     user.role = UserRole.ORGANIZER
     return await sign_up(user)
+
+@router.post("/admin/signin")
+async def admin_signin(user_data: UserAuth):
+    try:
+        # Generate SECRET_HASH
+        message = user_data.email + os.getenv("COGNITO_USER_POOL_CLIENT_ID")
+        key = os.getenv("COGNITO_CLIENT_SECRET").encode('utf-8')
+        secret_hash = base64.b64encode(
+            hmac.new(
+                key,
+                message.encode('utf-8'),
+                digestmod=hashlib.sha256
+            ).digest()
+        ).decode()
+
+        response = cognito_client.initiate_auth(
+            ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
+            AuthFlow="USER_PASSWORD_AUTH",
+            AuthParameters={
+                "USERNAME": user_data.email,
+                "PASSWORD": user_data.password,
+                "SECRET_HASH": secret_hash
+            }
+        )
+        
+        # Verify user is in organizer group
+        user_groups = cognito_client.admin_list_groups_for_user(
+            Username=user_data.email,
+            UserPoolId=os.getenv("COGNITO_USER_POOL_ID")
+        )
+        
+        is_organizer = any(group['GroupName'] == 'organizers' for group in user_groups['Groups'])
+        
+        if not is_organizer:
+            raise HTTPException(
+                status_code=403,
+                detail="User is not authorized as an organizer"
+            )
+        
+        return {
+            "message": "Login successful",
+            "token": response["AuthenticationResult"]["AccessToken"]
+        }
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        raise HTTPException(
+            status_code=401,
+            detail=f"Authentication failed: {error_message}"
+        )

@@ -20,33 +20,55 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
+import routes from '@/lib/routes';
 
 type FormData = {
   email: string;
   password: string;
 };
 
+function parseJwt(token: string) {
+  const base64Url = token.split('.')[1];
+  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const jsonPayload = decodeURIComponent(
+    atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+  );
+  return JSON.parse(jsonPayload);
+}
+
 export function AuthForm() {
+  const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const form = useForm<FormData>();
+  const form = useForm<FormData>({
+    defaultValues: {
+      email: '',
+      password: ''
+    }
+  });
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
   const onSubmit = async (data: FormData) => {
     try {
-      const endpoint = isLogin ? '/auth/signin' : '/auth/signup';
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
+      const response = await fetch('http://localhost:8000/auth/signin', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(data)
       });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
       const result = await response.json();
-      console.log(result);
+      localStorage.setItem('token', result.token);
+      router.push(routes.events.list);
     } catch (error) {
-      console.error('Auth error:', error);
+      console.error('Login failed:', error);
     }
   };
 
@@ -55,9 +77,7 @@ export function AuthForm() {
       <CardHeader>
         <CardTitle>{isLogin ? 'Login' : 'Register'}</CardTitle>
         <CardDescription>
-          {isLogin
-            ? 'Enter your credentials to login'
-            : 'Create a new account to continue'}
+          {isLogin ? 'Welcome back!' : 'Create your account'}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -84,9 +104,9 @@ export function AuthForm() {
                   <FormLabel>Password</FormLabel>
                   <FormControl>
                     <div className="relative">
-                      <Input 
-                        type={showPassword ? 'text' : 'password'} 
-                        {...field} 
+                      <Input
+                        type={showPassword ? 'text' : 'password'}
+                        {...field}
                       />
                       <Button
                         type="button"
@@ -112,15 +132,27 @@ export function AuthForm() {
             </Button>
           </form>
         </Form>
-        <Button
-          variant='link'
-          className='mt-4 w-full'
-          onClick={() => setIsLogin(!isLogin)}
-        >
-          {isLogin
-            ? "Don't have an account? Register"
-            : 'Already have an account? Login'}
-        </Button>
+        <div className="mt-4 flex gap-2">
+          <Button
+            variant='link'
+            className='w-full'
+            onClick={() => setIsLogin(!isLogin)}
+          >
+            {isLogin
+              ? "Don't have an account? Register"
+              : 'Already have an account? Login'}
+          </Button>
+
+          {isLogin && (
+            <Button
+              variant='link'
+              className='w-full'
+              onClick={() => router.push(routes.auth.organizer)}
+            >
+              Register as Organizer
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
