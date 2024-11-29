@@ -11,7 +11,8 @@ const routes = {
         eventsList: '/admin/events'
     },
     events: {
-        list: '/events',
+        list: '/admin/events',
+        participantList: '/events',
         detail: (id: string) => `/events/${id}`
     }
 };

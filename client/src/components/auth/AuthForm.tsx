@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/context/AuthContext';
 import {
   Form,
   FormControl,
@@ -39,6 +40,7 @@ function parseJwt(token: string) {
 
 export function AuthForm() {
   const router = useRouter();
+  const { login } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const form = useForm<FormData>({
@@ -65,8 +67,18 @@ export function AuthForm() {
       }
 
       const result = await response.json();
-      localStorage.setItem('token', result.token);
-      router.push(routes.events.list);
+      const token = result.token;
+
+      const decodedToken = parseJwt(token);
+
+      await login({
+        id: decodedToken.sub,
+        email: decodedToken.email,
+        token: token,
+        role: decodedToken['custom:role']
+      });
+
+      router.push(routes.events.participantList);
     } catch (error) {
       console.error('Login failed:', error);
     }

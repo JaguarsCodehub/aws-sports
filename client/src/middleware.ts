@@ -7,9 +7,9 @@ export function middleware(request: NextRequest) {
     const isAdminAuthPage = request.nextUrl.pathname === '/admin/login';
     const isAdminEventsPage = request.nextUrl.pathname === '/admin/events';
     const isAdminCreateEventsPage = request.nextUrl.pathname === '/admin/create-events';
-
+    const isAdminRegistrationsPage = request.nextUrl.pathname === '/admin/registrations';
     // Allow access to admin login and events pages
-    if (isAdminAuthPage || isAdminEventsPage || isAdminCreateEventsPage) {
+    if (isAdminAuthPage || isAdminEventsPage || isAdminCreateEventsPage || isAdminRegistrationsPage) {
         return NextResponse.next();
     }
 

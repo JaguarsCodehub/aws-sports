@@ -1,11 +1,15 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Form, Request, Query, Path
 from boto3.dynamodb.conditions import Key
 import boto3
 import os
 from uuid import uuid4
 from datetime import datetime
-from .models.models import Event
-from .middleware import require_role
+from .models.models import Event, REGISTRATION_REQUESTS_TABLE
+from .middleware import require_role, get_current_user
+from enum import Enum
+from pydantic import BaseModel
+from typing import List
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
@@ -13,6 +17,20 @@ router = APIRouter()
 dynamodb = boto3.resource('dynamodb', region_name=os.getenv('AWS_REGION'))
 s3 = boto3.client('s3', region_name=os.getenv('AWS_REGION'))
 events_table = dynamodb.Table(os.getenv('DYNAMODB_EVENTS_TABLE'))
+registration_requests_table = dynamodb.Table(REGISTRATION_REQUESTS_TABLE['TableName'])
+
+class RegistrationStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+class RegistrationRequest(BaseModel):
+    full_name: str
+    email: str
+    college_name: str
+    year_of_study: str
+    phone_number: str
+    why_interested: str
 
 @router.post("/")
 async def create_event(
@@ -77,27 +95,40 @@ async def get_event(event_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/events/{event_id}/register")
-@require_role("participant")
-async def register_for_event(event_id: str, user_id: str):
+@router.post("/{event_id}/register")
+async def register_for_event(
+    event_id: str,
+    current_user: dict = Depends(get_current_user)
+):
     try:
-        # Get event
-        response = events_table.get_item(Key={'id': event_id})
-        if 'Item' not in response:
+        # Get the event
+        event = events_table.get_item(Key={'id': event_id})
+        if 'Item' not in event:
             raise HTTPException(status_code=404, detail="Event not found")
         
-        event = response['Item']
-        if len(event['participants']) >= event['max_participants']:
+        event = event['Item']
+        
+        # Check if user is already registered
+        participants = event.get('participants', [])
+        if current_user['id'] in participants:
+            raise HTTPException(status_code=400, detail="Already registered for this event")
+            
+        # Check if event is full
+        if len(participants) >= event['max_participants']:
             raise HTTPException(status_code=400, detail="Event is full")
             
-        # Add participant
+        # Add user to participants
         events_table.update_item(
             Key={'id': event_id},
-            UpdateExpression="SET participants = list_append(participants, :user)",
-            ExpressionAttributeValues={':user': [user_id]}
+            UpdateExpression="SET participants = list_append(if_not_exists(participants, :empty_list), :user)",
+            ExpressionAttributeValues={
+                ':user': [current_user['id']],
+                ':empty_list': []
+            }
         )
         
         return {"message": "Successfully registered for event"}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -120,3 +151,152 @@ async def get_all_events():
         return response['Items']  # Return the list of events
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{event_id}/register-request")
+async def create_registration_request(
+    event_id: str,
+    registration_data: RegistrationRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Add debugging
+        print(f"AWS Region: {os.getenv('AWS_REGION')}")
+        print(f"Table name: {REGISTRATION_REQUESTS_TABLE['TableName']}")
+        
+        # List all tables for debugging
+        tables = dynamodb.meta.client.list_tables()['TableNames']
+        print(f"Available tables: {tables}")
+        
+        # First check if the event exists
+        event = events_table.get_item(Key={'id': event_id})
+        if 'Item' not in event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Try a simple put_item first without the scan
+        request_id = str(uuid4())
+        request_data = {
+            "id": request_id,
+            "event_id": event_id,
+            "user_id": current_user['id'],
+            "status": RegistrationStatus.PENDING,
+            "created_at": datetime.now().isoformat(),
+            **registration_data.model_dump()
+        }
+        
+        # Try to put the item first
+        try:
+            registration_requests_table.put_item(Item=request_data)
+            return {"message": "Registration request submitted successfully", "request_id": request_id}
+        except Exception as e:
+            print(f"Error putting item: {str(e)}")
+            raise
+            
+    except Exception as e:
+        print(f"Error creating registration request: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create registration request: {str(e)}")
+
+@router.get("/registration-requests/{status}")
+async def get_registration_requests(
+    request: Request,
+    status: str = Path(...),
+):
+    """
+    Get registration requests by status.
+    """
+    try:
+        # Print debug information
+        print("Request headers:", request.headers)
+        print("Status parameter:", status)
+        
+        # Validate status
+        if status not in [e.value for e in RegistrationStatus]:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Invalid status: {status}"}
+            )
+        
+        response = registration_requests_table.scan(
+            FilterExpression="#status = :status",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={':status': status}
+        )
+        
+        return JSONResponse(content=response.get('Items', []))
+        
+    except Exception as e:
+        print(f"Error in get_registration_requests: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e)}
+        )
+
+@router.put("/registration-requests/{request_id}")
+async def update_registration_status(
+    request_id: str,
+    status: RegistrationStatus,
+    user=Depends(require_role("organizer"))
+):
+    try:
+        # Update the registration request status
+        registration_requests_table.update_item(
+            Key={'id': request_id},
+            UpdateExpression="SET #status = :status",
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={':status': status}
+        )
+        
+        # If approved, add to event participants
+        if status == RegistrationStatus.APPROVED:
+            request = registration_requests_table.get_item(Key={'id': request_id})['Item']
+            events_table.update_item(
+                Key={'id': request['event_id']},
+                UpdateExpression="SET participants = list_append(if_not_exists(participants, :empty_list), :user)",
+                ExpressionAttributeValues={
+                    ':user': [request['user_id']],
+                    ':empty_list': []
+                }
+            )
+        
+        return {"message": f"Registration request {status}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/registration-requests/debug/{status}")
+async def debug_registration_requests(
+    request: Request,
+    status: str,
+):
+    print("Headers:", request.headers)
+    print("Query Params:", request.query_params)
+    print("Path Params:", request.path_params)
+    return {
+        "headers": dict(request.headers),
+        "query_params": dict(request.query_params),
+        "path_params": dict(request.path_params),
+    }
+
+@router.get("/registration-requests/debug/table")
+async def debug_table():
+    try:
+        # List all tables
+        tables = dynamodb.meta.client.list_tables()
+        print("Available tables:", tables['TableNames'])
+        
+        # Get table info
+        table_info = registration_requests_table.table_status
+        print("Table status:", table_info)
+        
+        # Try a simple scan
+        response = registration_requests_table.scan(Limit=1)
+        print("Sample scan:", response)
+        
+        return {
+            "tables": tables['TableNames'],
+            "table_status": table_info,
+            "sample_scan": response
+        }
+    except Exception as e:
+        print(f"Debug error: {str(e)}")
+        return {"error": str(e)}

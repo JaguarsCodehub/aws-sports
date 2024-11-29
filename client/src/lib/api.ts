@@ -1,28 +1,44 @@
-const API_BASE_URL = 'http://localhost:8000'
-
-export async function apiClient(endpoint: string, options: RequestInit = {}) {
+export const apiClient = async (endpoint: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('token')
 
-    const defaultHeaders: HeadersInit = {
+    const headers = {
+        'Accept': 'application/json',
         'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+        ...options.headers,
     }
 
-    if (token) {
-        defaultHeaders['Authorization'] = `Bearer ${token}`
-    }
-
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${endpoint}`;
+    console.log('Making request to:', url);
+    console.log('Request options:', {
         ...options,
-        headers: {
-            ...defaultHeaders,
-            ...options.headers,
-        },
-    })
+        headers,
+        body: options.body
+    });
 
-    if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Something went wrong')
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers,
+            mode: 'cors',
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Error response:', errorText);
+            try {
+                const errorJson = JSON.parse(errorText);
+                throw new Error(errorJson.detail || 'API request failed');
+            } catch {
+                throw new Error(errorText);
+            }
+        }
+
+        const data = await response.json();
+        console.log('Response data:', data);
+        return data;
+    } catch (error) {
+        console.error('API request failed:', error);
+        throw error;
     }
-
-    return response.json()
 }

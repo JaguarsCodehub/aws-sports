@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { apiClient } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { useRouter } from 'next/navigation'
 
 interface Event {
     id: string
@@ -14,6 +16,8 @@ interface Event {
 }
 
 export default function EventsList() {
+    const { user, logout } = useAuth()
+    const router = useRouter()
     const [events, setEvents] = useState<Event[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -39,6 +43,18 @@ export default function EventsList() {
 
     return (
         <div className="max-w-4xl mx-auto p-4">
+            <header className="flex justify-between items-center mb-6">
+                <h1 className="text-2xl font-bold">Project Name</h1>
+                {user ? (
+                    <button onClick={() => logout()} className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">
+                        Sign Out
+                    </button>
+                ) : (
+                    <button onClick={() => router.push('/admin-login')} className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">
+                        Login
+                    </button>
+                )}
+            </header>
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold">All Events</h1>
                 <Link

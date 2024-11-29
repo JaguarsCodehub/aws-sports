@@ -19,3 +19,24 @@ class Event(BaseModel):
     banner_url: Optional[str] = None
     status: EventStatus = EventStatus.UPCOMING
     participants: List[str] = []
+
+
+REGISTRATION_REQUESTS_TABLE = {
+    'TableName': 'registration-requests',
+    'KeySchema': [
+        {
+            'AttributeName': 'id',
+            'KeyType': 'HASH'  # Partition key
+        }
+    ],
+    'AttributeDefinitions': [
+        {
+            'AttributeName': 'id',
+            'AttributeType': 'S'
+        }
+    ],
+    'ProvisionedThroughput': {
+        'ReadCapacityUnits': 5,
+        'WriteCapacityUnits': 5
+    }
+}

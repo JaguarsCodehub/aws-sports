@@ -1,6 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { useRouter } from 'next/navigation'
+import { RegistrationModal } from '@/components/RegistrationModal'
 
 interface Event {
   id: string
@@ -10,11 +13,21 @@ interface Event {
   location: string
   max_participants: number
   banner_url?: string
+  participants?: string[]
 }
 
 const EventsPage = () => {
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
+  const { user, logout } = useAuth()
+  const router = useRouter();
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const [showRegistrationModal, setShowRegistrationModal] = useState(false)
+
+  const handleRegister = (eventId: string) => {
+    setSelectedEventId(eventId)
+    setShowRegistrationModal(true)
+  }
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -38,6 +51,18 @@ const EventsPage = () => {
 
   return (
     <div className="max-w-7xl mx-auto p-4">
+      <header className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Project Name</h1>
+        {user ? (
+          <button onClick={() => logout} className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">
+            Sign Out
+          </button>
+        ) : (
+          <button onClick={() => router.push('/admin-login')} className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">
+            Login
+          </button>
+        )}
+      </header>
       <h1 className="text-2xl font-bold mb-6">Available Events</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {events.map((event) => (
@@ -57,14 +82,25 @@ const EventsPage = () => {
               <p>👥 Max Participants: {event.max_participants}</p>
             </div>
             <button
-              className="mt-4 w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
-              onClick={() => {/* Add registration handler */ }}
+              className="mt-4 w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
+              onClick={() => handleRegister(event.id)}
+              disabled={!user}
             >
-              Register for Event
+              {user ? 'Register for Event' : 'Login to Register'}
             </button>
           </div>
         ))}
       </div>
+      {showRegistrationModal && selectedEventId && (
+        <RegistrationModal
+          isOpen={showRegistrationModal}
+          onClose={() => setShowRegistrationModal(false)}
+          eventId={selectedEventId}
+          onSuccess={() => {
+            alert('Registration request submitted successfully! Admin will review your application.')
+          }}
+        />
+      )}
     </div>
   )
 }

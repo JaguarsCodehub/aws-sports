@@ -1,9 +1,47 @@
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 import jwt
 import os
 from jwt.algorithms import RSAAlgorithm
 import requests
 from functools import wraps
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False}, algorithms=["RS256"])
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return {
+            "id": payload["sub"],
+            "email": payload.get("email", ""),
+            "role": payload.get("custom:role", "participant")
+        }
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_role(required_role: str):
+    async def dependency(request: Request):
+        try:
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                raise HTTPException(status_code=401, detail="No valid token provided")
+
+            token = auth_header.split(' ')[1]
+            try:
+                payload = jwt.decode(token, os.getenv('JWT_SECRET'), algorithms=['HS256'])
+                if payload.get('role') != required_role:
+                    raise HTTPException(status_code=403, detail="Insufficient permissions")
+                return payload
+            except jwt.ExpiredSignatureError:
+                raise HTTPException(status_code=401, detail="Token has expired")
+            except jwt.JWTError:
+                raise HTTPException(status_code=401, detail="Invalid token")
+        except Exception as e:
+            print(f"Auth error: {str(e)}")
+            raise
+    return dependency
 
 def get_cognito_public_keys():
     region = os.getenv('AWS_REGION')
