@@ -10,6 +10,8 @@ from enum import Enum
 from pydantic import BaseModel
 from typing import List
 from fastapi.responses import JSONResponse
+from botocore.exceptions import ClientError
+import json
 
 router = APIRouter()
 
@@ -18,6 +20,8 @@ dynamodb = boto3.resource('dynamodb', region_name=os.getenv('AWS_REGION'))
 s3 = boto3.client('s3', region_name=os.getenv('AWS_REGION'))
 events_table = dynamodb.Table(os.getenv('DYNAMODB_EVENTS_TABLE'))
 registration_requests_table = dynamodb.Table(REGISTRATION_REQUESTS_TABLE['TableName'])
+sns = boto3.client('sns', region_name=os.getenv('AWS_REGION'))
+SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
 
 class RegistrationStatus(str, Enum):
     PENDING = "PENDING"
@@ -159,68 +163,66 @@ async def create_registration_request(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        # Add debugging
-        print(f"AWS Region: {os.getenv('AWS_REGION')}")
-        print(f"Table name: {REGISTRATION_REQUESTS_TABLE['TableName']}")
-        
-        # List all tables for debugging
-        tables = dynamodb.meta.client.list_tables()['TableNames']
-        print(f"Available tables: {tables}")
-        
         # First check if the event exists
         event = events_table.get_item(Key={'id': event_id})
         if 'Item' not in event:
             raise HTTPException(status_code=404, detail="Event not found")
         
-        # Try a simple put_item first without the scan
+        event_data = event['Item']
+        
+        # Check if user is already registered
+        participants = event_data.get('participants', [])
+        if current_user['id'] in participants:
+            raise HTTPException(status_code=400, detail="Already registered for this event")
+            
+        # Check if event is full
+        if len(participants) >= event_data['max_participants']:
+            raise HTTPException(status_code=400, detail="Event is full")
+
         request_id = str(uuid4())
         request_data = {
             "id": request_id,
             "event_id": event_id,
             "user_id": current_user['id'],
-            "status": RegistrationStatus.PENDING,
+            "status": RegistrationStatus.APPROVED,
             "created_at": datetime.now().isoformat(),
             **registration_data.model_dump()
         }
+            
+        # Create registration request
+        registration_requests_table.put_item(Item=request_data)
         
-        # Try to put the item first
-        try:
-            registration_requests_table.put_item(Item=request_data)
-            return {"message": "Registration request submitted successfully", "request_id": request_id}
-        except Exception as e:
-            print(f"Error putting item: {str(e)}")
-            raise
+        # Add user to event participants
+        events_table.update_item(
+            Key={'id': event_id},
+            UpdateExpression="SET participants = list_append(if_not_exists(participants, :empty_list), :user)",
+            ExpressionAttributeValues={
+                ':user': [current_user['id']],
+                ':empty_list': []
+            }
+        )
+
+        # Send confirmation email
+        await send_registration_confirmation(
+            email=registration_data.email,
+            event_data=event_data,
+            registration_data=request_data
+        )
+        
+        return {"message": "Registration request submitted successfully", "request_id": request_id}
             
     except Exception as e:
         print(f"Error creating registration request: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create registration request: {str(e)}")
 
-@router.get("/registration-requests/{status}")
-async def get_registration_requests(
-    request: Request,
-    status: str = Path(...),
-):
+@router.get("/registration-requests")
+async def get_registration_requests(request: Request):
     """
-    Get registration requests by status.
+    Get all registration requests regardless of status.
     """
     try:
-        # Print debug information
-        print("Request headers:", request.headers)
-        print("Status parameter:", status)
-        
-        # Validate status
-        if status not in [e.value for e in RegistrationStatus]:
-            return JSONResponse(
-                status_code=400,
-                content={"detail": f"Invalid status: {status}"}
-            )
-        
-        response = registration_requests_table.scan(
-            FilterExpression="#status = :status",
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={':status': status}
-        )
-        
+        # Simple scan without any filters
+        response = registration_requests_table.scan()
         return JSONResponse(content=response.get('Items', []))
         
     except Exception as e:
@@ -300,3 +302,33 @@ async def debug_table():
     except Exception as e:
         print(f"Debug error: {str(e)}")
         return {"error": str(e)}
+
+async def send_registration_confirmation(email: str, event_data: dict, registration_data: dict):
+    try:
+        message = {
+            "email": email,
+            "subject": f"Registration Confirmation - {event_data['title']}",
+            "message": f"""
+            Dear {registration_data['full_name']},
+
+            Thank you for registering for {event_data['title']}!
+
+            Event Details:
+            - Date: {event_data['date']}
+            - Location: {event_data['location']}
+
+            We're excited to have you join us!
+
+            Best regards,
+            The Event Team
+            """
+        }
+
+        response = sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=json.dumps(message),
+            MessageStructure='string'
+        )
+        print(f"Sent confirmation email to {email}: {response['MessageId']}")
+    except Exception as e:
+        print(f"Error sending confirmation email: {str(e)}")

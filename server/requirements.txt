@@ -2,6 +2,11 @@ fastapi
 boto3
 pydantic
 uvicorn
+PyJWT
+PyJWT[crypto]==2.3.0
+python-multipart
+
+
 AWS_ACCESS_KEY_ID=AKIA4MI2JP2FOQXW4QGJ
 AWS_SECRET_ACCESS_KEY=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
 AWS_REGION=us-east-1

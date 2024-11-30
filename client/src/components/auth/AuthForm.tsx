@@ -85,14 +85,14 @@ export function AuthForm() {
   };
 
   return (
-    <Card className='w-[350px]'>
+    <Card className='w-[450px]'>
       <CardHeader>
-        <CardTitle>{isLogin ? 'Login' : 'Register'}</CardTitle>
+        <CardTitle className='text-2xl font-bold'>{isLogin ? 'Login' : 'Register'}</CardTitle>
         <CardDescription>
           {isLogin ? 'Welcome back!' : 'Create your account'}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className='bg-white/90 backdrop-blur-lg'>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-4'>
             <FormField
@@ -100,7 +100,7 @@ export function AuthForm() {
               name='email'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
+                  <FormLabel className='text-base'>Email</FormLabel>
                   <FormControl>
                     <Input placeholder='email@example.com' {...field} />
                   </FormControl>
@@ -155,7 +155,7 @@ export function AuthForm() {
               : 'Already have an account? Login'}
           </Button>
 
-          {isLogin && (
+          {/* {isLogin && (
             <Button
               variant='link'
               className='w-full'
@@ -163,7 +163,7 @@ export function AuthForm() {
             >
               Register as Organizer
             </Button>
-          )}
+          )} */}
         </div>
       </CardContent>
     </Card>
