@@ -332,3 +332,18 @@ async def send_registration_confirmation(email: str, event_data: dict, registrat
         print(f"Sent confirmation email to {email}: {response['MessageId']}")
     except Exception as e:
         print(f"Error sending confirmation email: {str(e)}")
+
+@router.get("/analytics/registrations")
+async def get_registration_analytics(user=Depends(require_role("organizer"))):
+    try:
+        lambda_client = boto3.client('lambda')
+        response = lambda_client.invoke(
+            FunctionName='registration_analytics',
+            InvocationType='RequestResponse'
+        )
+        
+        payload = json.loads(response['Payload'].read())
+        return JSONResponse(content=payload.get('body', {}))
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
